@@ -1,0 +1,131 @@
+---
+title: "Untitled"
+output: pdf_document
+date: '2023-02-26'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library("midfieldr")
+library("midfielddata")
+suppressMessages(library("data.table"))
+```
+
+
+```{r}
+data(term)
+```
+
+
+```{r}
+
+piece_1 <- term %>% filter(!is.na(institution), #Keras can't handle any NA's so filter
+              !is.na(cip6),
+              !is.na(level),
+              !is.na(standing),
+              !is.na(hours_term_attempt),
+              !is.na(hours_term),
+              !is.na(hours_cumul),
+              !is.na(hours_cumul_attempt),
+              !is.na(gpa_term),
+              !is.na(gpa_cumul)) %>% 
+              group_by(mcid) %>%  #group by each student
+  
+              #How many terms the student is in good standing
+              mutate(NumGoodTerms = sum(standing == "Good Standing"),
+              #How many terms the student is on academic probation
+              NumProbationTerms = sum(standing == "Academic Probation")) %>% 
+  
+              #Level is grade 1 being freshmen, 4 being senior
+              mutate(level = case_when(
+                level %like% "^01" ~ 1,
+                level %like% "^02" ~ 2,
+                level %like% "^03" ~ 3,
+                level %like% "^04" ~4
+            )) %>%
+            #We want to know what grade they were in in their last term
+            filter(level == max(level)) %>%
+            rename(highest_level = level) %>%
+            select(mcid,highest_level, NumGoodTerms, NumProbationTerms) %>%
+            distinct()  #break it down to one entry per student 
+
+piece_2 <- term %>%
+          group_by(mcid) %>%
+          #what was each students average hours per term
+          summarize(avg_hours_per_term = mean(hours_term, na.rm = TRUE))
+piece_3 <- term %>%
+            group_by(mcid) %>%
+            arrange(desc(term)) %>%
+            slice(1) %>%
+            #GPA in last term (useful since most don't graduate)
+            select(mcid, final_gpa = gpa_cumul)
+```
+```{r}
+#Join data 
+new_term <- full_join(piece_1, piece_2) %>%
+  left_join(piece_3) 
+```
+
+
+```{r}
+#Identifying student's change of majors
+
+cip6_tbl <- left_join(
+  #Student's first declared major 
+  term %>%
+    group_by(mcid) %>%
+    filter(term == min(term)) %>%
+    distinct(mcid, cip6, .keep_all = FALSE) %>%
+    select(mcid, initial_cip6 = cip6),
+  term %>%
+    #student's last declared major
+    group_by(mcid) %>%
+    filter(term == max(term)) %>%
+    distinct(mcid, cip6, .keep_all = FALSE) %>%
+    select(mcid, final_cip6 = cip6)
+) %>% left_join(
+  term %>%
+    #The major the student declared for the most terms 
+    distinct(mcid, term, cip6) %>%
+    group_by(mcid, cip6) %>%
+    summarize(n = n()) %>%
+    arrange(desc(n)) %>%
+    slice(1) %>%
+    select(mcid, most_prevalent_cip6 = cip6),
+  by = "mcid"
+) %>% left_join(
+  #how many times they changed their major 
+  term %>%
+    distinct(mcid, cip6, .keep_all = FALSE) %>%
+    group_by(mcid) %>%
+    summarize(major_changes = n() - 1)
+) %>% 
+  mutate(initial_cip6 = as.numeric(initial_cip6),
+    final_cip6 = as.numeric(final_cip6),
+    most_prevalent_cip6 = as.numeric(most_prevalent_cip6))
+
+
+```
+```{r}
+#Cip6 of 999999 is undeclared, filter out because they give us zero information 
+#and join data 
+tbl <- cip6_tbl %>%
+  distinct() %>%
+  group_by(mcid) %>%
+  mutate(n = n()) %>%
+  filter(ifelse(n == 1, TRUE, initial_cip6 != 999999 & final_cip6 != 999999 & most_prevalent_cip6 != 999999)) %>%
+  select(-n) %>%
+  slice(1) %>%
+  full_join(piece_1) %>%
+  full_join(piece_2) %>%
+  full_join(piece_3)
+```
+
+```{r}
+#rescale numeric data to be between 0 and 1
+terms_tbl <- cbind(tbl[,1:4],tbl[,5:10] %>% resca(new_min = 0, new_max = 1, keep = FALSE))
+            
+```
+
+

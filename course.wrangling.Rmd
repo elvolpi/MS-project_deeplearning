@@ -1,0 +1,130 @@
+---
+title: "MIDFIELD course table wrangling"
+output: pdf_document
+date: '2023-02-25'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library("midfieldr")
+library("midfielddata")
+suppressMessages(library("data.table"))
+library(metan)
+library(readxl)
+```
+
+```{r}
+data(course)
+```
+```{r}
+course_tbl1 <- course |> 
+  filter(!is.na(institution),  #Keras cannot handle ANY NA's 
+         !is.na(abbrev),
+         !is.na(number),
+         !is.na(grade),
+         !is.na(hours_course),
+         #filter out non-standard grades (coops, internshis etc )
+         grade %in% c("A+", "A", "A-",  
+                      "B+", "B", "B-", 
+                      "C+", "C", "C-", 
+                      "D+", "D", "D-", "F")) |> 
+  #Instead of course numbers, have them as lower division courses or upper division courses 
+  mutate(course, upper_lower = ifelse(grepl("^[3-9]", number), "upper", "lower")) |> 
+  mutate(course = paste(institution,abbrev, upper_lower)) |>
+  #Convert grades to 4.0 scale
+  mutate(num_grades = case_when(
+    grade == "A+" ~ 4,
+    grade == "A" ~ 4,
+    grade == "A-" ~ 4-0.3,
+    grade == "B+" ~ 3+0.3,
+    grade == "B" ~ 3,
+    grade == "B-" ~ 3-0.3,
+    grade == "C+" ~ 2+0.3,
+    grade == "C" ~ 2,
+    grade == "C-" ~ 2-0.3,
+    grade == "D+" ~ 1+0.3,
+    grade == "D" ~ 1,
+    grade == "D-" ~ 1-0.3,
+    FALSE ~ 0)) |> 
+  # get course points
+  mutate(course_pts = num_grades * hours_course) |> 
+  select(mcid, term, course, course_pts) |> 
+  group_by(mcid, course) |> 
+  summarize(course_pts = sum(course_pts), .groups = "drop") |> 
+  ungroup() |> 
+  #Make data so that its one entry per student 
+  pivot_wider(id_cols = mcid, 
+              names_from = course,
+              values_from = course_pts,
+              values_fill = 0) 
+
+```
+
+
+```{r}
+# We want to know whether each student had withdrawals and incompletes during their education. 
+wi_tbl <- course |> 
+  filter(!is.na(institution), #filter NA's 
+         !is.na(abbrev),
+         !is.na(number),
+         !is.na(grade),
+         !is.na(hours_course)) %>% 
+         
+  group_by(mcid) |> 
+  summarize(num_W = sum(grade == "W"), #number of withdrawals
+            num_I = sum(grade == "I"), #number of incompletes
+            num_WI = num_W + num_I)    #number of combined withdrawals+incompletes
+```
+```{r}
+course_tbl2 <- left_join(wi_tbl, course_tbl1)   
+              
+```
+
+
+```{r}
+course_tbl <- course_tbl2 %>% select(-mcid) %>% 
+              resca(new_min = 0, new_max = 1, keep = FALSE) #Rescale numeric table
+
+#replace Na's with -1 if zero is meaningful, zero otherwise 
+c1 <- course_tbl[,1:3] %>% replace_na(-1)
+c2 <- course_tbl[,-c(1:3)] %>% replace(is.na(.),0)
+#join data 
+course_stnd <- cbind(mcid = course_tbl2$mcid, c1,c2)
+              
+              
+```
+
+```{r}
+#determining stem grads
+data(student, degree)
+ 
+#Get eligible stem cip codes from DHS 
+STEM_CIP <- read_excel("~/OneDrive/Documents/Deep Learning Codes/STEM_CIP_new.xlsx")
+#extra stem codes to include broader categories 
+stem_list = c(40,27,26,14)  #schools can have majors that aren't anywhere else 
+
+
+#If there is no degree for student, not a grad so not a stem grad
+#ifelse they are grad so check if stem grad.
+#Need to check the full cip6 and the first two digits
+std_degree <- left_join(student, degree %>% select(mcid, degree_cip6 = cip6) %>% mutate(is_grad = 1)) %>% 
+  mutate(is_stemGrad = ifelse((is_grad == "1" & degree_cip6 %in% STEM_CIP | (substring(degree_cip6,1,2) %in% stem_list)),1,0 )) %>%
+  replace(is.na(.), 0) %>% #If NA, replace with zero 
+  select(mcid,  is_stemGrad)  #is_stemGrad binary target 
+
+```
+
+
+```{r}
+#join all the data together
+lower_div_course <- left_join(course_stnd, std_degree) %>% 
+                    select(mcid, contains("num"), contains("lower"), is_stemGrad)
+```
+```{r}
+#save course data as it's own file.
+save(lower_div_course, file = "lower_div_course_new.Rda")
+```
+
+
+

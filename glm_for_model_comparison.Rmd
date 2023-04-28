@@ -1,0 +1,87 @@
+---
+title: "GLM-MIDFIELD"
+output: pdf_document
+date: '2023-03-11'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(rsample)
+```
+
+
+```{r}
+load("lower_div_course_new.Rda")
+```
+
+```{r}
+set.seed(100)
+train_test_split <- initial_split(lower_div_course, prop = 0.7)
+train_test_split
+```
+
+```{r}
+train_tbl <- training(train_test_split)
+
+test_tbl  <- testing(train_test_split)
+x_train_tbl =  as.data.frame(train_tbl %>% select(-is_stemGrad, -mcid))
+y_train_labels <- train_tbl$is_stemGrad
+
+y_test_labels <- test_tbl$is_stemGrad
+
+x_test_tbl <- test_tbl %>% select(-is_stemGrad, -mcid)
+
+```
+
+```{r}
+mod <- glm(y_train_labels ~ ., data= x_train_tbl, family = binomial)
+```
+```{r}
+summary(mod)
+```
+```{r}
+predictions_course <- predict(mod, newdata = x_test_tbl, type = "response")
+hist(predictions_course)
+
+```
+```{r}
+(conf_matrix_course_response <- table(predictions_course >0.5 , y_test_labels))
+
+```
+```{r}
+conf_matrix_course_response[2,2]/sum(conf_matrix_course_response[,2])
+```
+
+
+```{r}
+load("student_terms_new.Rda")
+```
+```{r}
+set.seed(100)
+train_test_split <- initial_split(student_terms, prop = 0.7)
+train_test_split
+```
+```{r}
+train_tbl <- training(train_test_split)
+
+test_tbl  <- testing(train_test_split)
+x_train_tbl =  train_tbl %>% select(-is_stemGrad, -mcid)
+y_train_labels <- train_tbl$is_stemGrad
+
+y_test_labels <- test_tbl$is_stemGrad
+
+x_test_tbl <- test_tbl %>% select(-is_stemGrad, -mcid)
+```
+
+```{r}
+student_mod <- glm(y_train_labels ~ .,  data =x_train_tbl, family = binomial)
+summary(student_mod)
+```
+```{r}
+predictions_student <- predict(student_mod, newdata = x_test_tbl, type = "response")
+hist(predictions_student)
+conf_matrix_student_response <- table(predictions_student >0.5 , y_test_labels)
+conf_matrix_student_response[2,2]/sum(conf_matrix_student_response[,2])
+```
+

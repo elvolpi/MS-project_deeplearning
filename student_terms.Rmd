@@ -1,0 +1,79 @@
+---
+title: "Student Terms model"
+output: pdf_document
+date: '2023-03-07'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(rsample)
+library(caret)
+library(keras)
+library(tidymodels)
+
+```
+
+```{r}
+load("student_terms.Rda")
+```
+#70/30 training/testing split 
+```{r}
+set.seed(100)
+train_test_split <- initial_split(student_terms, prop = 0.7)
+train_test_split
+```
+#Set up testing and training tbls and labels. 
+```{r}
+train_tbl <- training(train_test_split)
+
+test_tbl  <- testing(train_test_split)
+```
+
+```{r}
+x_train_tbl =  train_tbl %>% select(-is_stemGrad, -mcid)
+y_train_labels <- train_tbl$is_stemGrad
+
+y_test_labels <- test_tbl$is_stemGrad
+
+x_test_tbl <- test_tbl %>% select(-is_stemGrad, -mcid)
+```
+
+
+```{r}
+student_terms_mdl <-  keras_model_sequential()
+student_terms_mdl %>% 
+  layer_dense(units = 16, activation ="relu", input_shape = ncol(x_train_tbl) ) %>%
+  
+ 
+  layer_dense(units = 2, activation= "sigmoid")
+summary(student_terms_mdl)
+```
+```{r}
+student_terms_mdl %>% compile(
+  loss = 'binary_crossentropy',
+  optimizer = 'adam',
+  metrics = metric_recall() #Keras recall actually looks at the majority case and not the minority case!!!! 
+)
+```
+
+```{r}
+history <-  fit(
+  object = student_terms_mdl,
+  x = as.matrix(x_train_tbl),
+  y=to_categorical(y_train_labels),
+  epochs = 120, batch_size = 32, 
+  validation_split = 0.3
+)
+```
+```{r}
+#Consider predicting STEM grad as greater than 50% probability 
+pred <- student_terms_mdl %>% 
+  predict(as.matrix(x_test_tbl)) %>%
+  `>`(0.5) %>%
+  k_cast("int32")
+
+#Confusion matrix 
+conf_mat <- table(as.numeric(pred[,2]), y_test_labels)
+conf_mat
+```
